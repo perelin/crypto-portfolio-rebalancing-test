@@ -2,19 +2,19 @@
 '''
 pipenv shell
 '''
-
+import datetime
 from pprint import pprint
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
 import broker
+import prices
 from logger import log
-from data import *
 
 '''
 
-(-) use central sql model / sql file
+(/) use central sql model / sql file
 
 (/) have all values in USD:
     get BTC/USDT values as well -> own series/df
@@ -23,7 +23,7 @@ from data import *
 
 (-) calculate sharpe/sortino value, based on https://www.theice.com/iba/libor risk free asset (ca 2% anual return)
 
-(-) for rebalancing use 0.25% fee p trade
+(/) for rebalancing use 0.25% fee p trade
 
 (-) test 1: hold the x most valuable symbols from date x
 (-) test 2: rebalance every x to update to current most valuable symbols
@@ -36,46 +36,47 @@ instead of most valuable, use highest gainer (1d, 7d, 30d)
 
 '''
 
+
 def most_expensive_symbols_returns(combined_data_df: pd.DataFrame(),
                                    date: str = '2017-05-01'):
-    ''' Calculate the return of the most expensive coins at the given date '''
+    ''' DEPRECATED: Calculate the return of the most expensive coins at the given date '''
 
     # Calculate
-    portfolio_size = 20
-    most_expensive_symbols = get_most_expensive_symbols(combined_data_df, date)
-    print('Most expensive coins for: ' + date, most_expensive_symbols[0:portfolio_size])
-    last_date = combined_data_df.index[-1]
-    mes_start_values = combined_data_df.loc[date,
-                                            most_expensive_symbols[0:portfolio_size]]
-    mes_end_values = combined_data_df.loc[last_date,
-                                          most_expensive_symbols[0:portfolio_size]]
+    portfolio_size = 10
+    most_expensive_symbols = prices.get_most_expensive_symbols(combined_data_df, date)
+    print('Most expensive coins for: ' + date,
+          most_expensive_symbols[0:portfolio_size])
+    #last_date = combined_data_df.index[-1]
+    last_date = '2017-12-01'
+    mes_start_values = combined_data_df.loc[date, most_expensive_symbols[
+        0:portfolio_size]]
+    mes_end_values = combined_data_df.loc[last_date, most_expensive_symbols[
+        0:portfolio_size]]
     mes_delta_df = pd.concat([mes_start_values, mes_end_values], axis=1)
     mes_final_returns = mes_delta_df.transpose().pct_change().loc[last_date]
     print('Total return: ', mes_final_returns.sum() / len(mes_final_returns))
     print(mes_final_returns)
 
     # Plot
-    plt.rcParams["patch.force_edgecolor"] = True
-    plt.hist(mes_final_returns * 100, bins=80)
+    #plt.rcParams["patch.force_edgecolor"] = True
+    #plt.hist(mes_final_returns * 100, bins=80)
     # plt.show(block=True)
 
-def backtest(data: pd.DataFrame(), startdate: str, enddate: str):
 
+def backtest(data: pd.DataFrame(),
+             startdate: str,
+             enddate: str,
+             rebalancing: bool = True):
     '''
-        // set initial money
-        // get symbols to start with
-        // create position for every symbol, equal distribution
-        // step over data
-        check if data ended
-        halt every x period
-        check distribution, rebalance
-        continue stepping
+        Basic portfolio strategy
     '''
+
+    rebalancing_cadence = pd.np.timedelta64(1, 'D')
 
     # Setup inital trading universe
     portfolio_size = 10
-    portfolio_symbols = get_most_expensive_symbols(data, startdate)[
-        0:portfolio_size]
+    portfolio_symbols = prices.get_most_expensive_symbols(data,
+                                                   startdate)[0:portfolio_size]
 
     # Setup initial $$$
     initial_quote_amount = broker.QUOTE_AMOUNT
@@ -92,9 +93,15 @@ def backtest(data: pd.DataFrame(), startdate: str, enddate: str):
     # Step over Data
     candle_date = data[startdate:enddate].index.values
     date_totals = {}
+    next_rebalancing_date = candle_date[0] + rebalancing_cadence
+
     for date in candle_date:
+
         # Portfolio Logic
-        #rebalance_portfolio_weights(data, date)
+        if date == next_rebalancing_date and rebalancing:
+            rebalance_portfolio_weights(data, date)
+            next_rebalancing_date = date + rebalancing_cadence
+
         # Equity curve calculation
         final_total_value, portfolio_values = broker.get_value_at(data, date)
         date_totals[date] = final_total_value
@@ -106,7 +113,8 @@ def backtest(data: pd.DataFrame(), startdate: str, enddate: str):
 
     # Equity curve to Series
     candle_date_series = pd.Series(date_totals)
-    #log.debug(candle_date_series)
+    candle_date_dfr = pd.DataFrame(candle_date_series, columns=['total_value'])
+    #calculate_sharpe(candle_date_dfr)
 
     # Ploting
     BTC_series = data.loc[startdate:enddate, 'BTC']
@@ -114,7 +122,23 @@ def backtest(data: pd.DataFrame(), startdate: str, enddate: str):
     plt.plot(candle_date_series, label='Portfolio')
     plt.plot(BTC_series, label='BTC')
     plt.legend()
+    #plt.show(block=True)
+
+
+
+def calculate_sharpe(candle_date_dfr: pd.DataFrame()):
+    candle_date_dfr['pct_change'] = candle_date_dfr[
+        'total_value'].pct_change().fillna(0)
+    print(candle_date_dfr)
+    print(candle_date_dfr['pct_change'].std())
+    print(candle_date_dfr['pct_change'].mean())
+    # WIP....
+
+    # Plot
+    plt.rcParams["patch.force_edgecolor"] = True
+    plt.hist(candle_date_dfr['pct_change'], bins=80)
     plt.show(block=True)
+
 
 def rebalance_portfolio_weights(data: pd.DataFrame(), date: str):
 
@@ -199,23 +223,16 @@ def rebalance_portfolio_weights(data: pd.DataFrame(), date: str):
     log.debug("Total portfolio value: {}".format(round(final_total_value, 2)))
 
 
-
-
-
 if __name__ == '__main__':
 
     log.info("Backtest starting...")
-    db.connect()
+    prices.db.connect()
 
     log.info("Collecting and preparing data...")
-    combined_df = get_all_data_combined()
-    data = convert_combined_df_to_usdt(combined_df)
+    combined_df = prices.get_all_data_combined()
+    data = prices.convert_combined_df_to_usdt(combined_df)
     log.debug("Data USD values data frame: \n {}".format(data.tail(5)))
 
-    #print(data.head(5))
-    #most_expensive_symbols_returns(data)
-
     log.info("Testing...")
-    backtest(data=data, startdate='2017-01-01', enddate='2017-12-01')
-
-    #rebalance_portfolio_weights(data, '2017-12-01')
+    backtest(
+        data=data, startdate='2017-01-01', enddate='2017-12-01', rebalancing=True)
