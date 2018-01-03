@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 
 import broker
 import prices
+import rebalancer
 from logger import log
-
 '''
 
 (/) use central sql model / sql file
@@ -25,7 +25,7 @@ from logger import log
 
 (/) for rebalancing use 0.25% fee p trade
 
-(-) test 1: hold the x most valuable symbols from date x
+(/) test 1: hold the x most valuable symbols from date x
 (-) test 2: rebalance every x to update to current most valuable symbols
 (-) test 3: rebalance like 2 + rebalance weights
 (-) test 4: rebalance like 2 + rebalance weight - distribution accrding to time (/position) in most valuable
@@ -37,30 +37,27 @@ instead of most valuable, use highest gainer (1d, 7d, 30d)
 '''
 
 
-def most_expensive_symbols_returns(combined_data_df: pd.DataFrame(),
-                                   date: str = '2017-05-01'):
-    ''' DEPRECATED: Calculate the return of the most expensive coins at the given date '''
+def get_portfolio_composition_01(data: pd.DataFrame(),
+                                 date: str,
+                                 portfolio_size: int = 10):
+    '''
+        Equal distribution
+    '''
 
-    # Calculate
-    portfolio_size = 10
-    most_expensive_symbols = prices.get_most_expensive_symbols(combined_data_df, date)
-    print('Most expensive coins for: ' + date,
-          most_expensive_symbols[0:portfolio_size])
-    #last_date = combined_data_df.index[-1]
-    last_date = '2017-12-01'
-    mes_start_values = combined_data_df.loc[date, most_expensive_symbols[
-        0:portfolio_size]]
-    mes_end_values = combined_data_df.loc[last_date, most_expensive_symbols[
-        0:portfolio_size]]
-    mes_delta_df = pd.concat([mes_start_values, mes_end_values], axis=1)
-    mes_final_returns = mes_delta_df.transpose().pct_change().loc[last_date]
-    print('Total return: ', mes_final_returns.sum() / len(mes_final_returns))
-    print(mes_final_returns)
+    # Get symbols
+    portfolio_symbols = prices.get_most_expensive_symbols(
+        data, date)[0:portfolio_size]
 
-    # Plot
-    #plt.rcParams["patch.force_edgecolor"] = True
-    #plt.hist(mes_final_returns * 100, bins=80)
-    # plt.show(block=True)
+    # Get weight distribution
+    portfolio_target_weight = 1 / portfolio_size
+    portfolio_weights = pd.np.array([portfolio_target_weight])
+    portfolio_weights = pd.np.repeat(portfolio_weights, portfolio_size)
+
+    # Build data frame
+    portfolio_composition_dfr = pd.DataFrame(
+        portfolio_weights, index=portfolio_symbols, columns=['basic_weight'])
+
+    return portfolio_composition_dfr
 
 
 def backtest(data: pd.DataFrame(),
@@ -75,31 +72,54 @@ def backtest(data: pd.DataFrame(),
 
     # Setup inital trading universe
     portfolio_size = 10
-    portfolio_symbols = prices.get_most_expensive_symbols(data,
-                                                   startdate)[0:portfolio_size]
+    portfolio_symbols = prices.get_most_expensive_symbols(
+        data, startdate)[0:portfolio_size]
 
-    # Setup initial $$$
-    initial_quote_amount = broker.QUOTE_AMOUNT
-    initial_invest_per_symbol = broker.QUOTE_AMOUNT / len(portfolio_symbols)
+    # # Setup initial $$$
+    # initial_quote_amount = broker.QUOTE_AMOUNT
+    # initial_invest_per_symbol = broker.QUOTE_AMOUNT / len(portfolio_symbols)
 
-    # Buy initial portfolio
-    for symbol in portfolio_symbols:
-        broker.buy(
-            data=data,
-            date=startdate,
-            base=symbol,
-            quote_buy_amount=initial_invest_per_symbol)
+    # # Buy initial portfolio
+    # for symbol in portfolio_symbols:
+    #     broker.buy(
+    #         data=data,
+    #         date=startdate,
+    #         base=symbol,
+    #         quote_buy_amount=initial_invest_per_symbol)
+
+    initial_portfolio_composition = get_portfolio_composition_01(
+        data=data, date=startdate, portfolio_size=portfolio_size)
+    rebalancer.rebalance_positions(
+        data=data, date=startdate, composition=initial_portfolio_composition)
 
     # Step over Data
     candle_date = data[startdate:enddate].index.values
-    date_totals = {}
     next_rebalancing_date = candle_date[0] + rebalancing_cadence
+    date_totals = {}
+    last_mes = portfolio_symbols
 
     for date in candle_date:
 
         # Portfolio Logic
+
+        current_mes = prices.get_most_expensive_symbols(data,
+                                                        date)[0:portfolio_size]
+        if set(last_mes) != set(current_mes):
+            # print("Set Order changed! {}".format(date))
+            # print(last_mes)
+            # print(current_mes)
+            pass
+
+        # if pd.np.array_equal(last_mes, current_mes) != True:
+        #     print("NP Order changed! {}".format(date))
+
+        # print(date)
+        # print(last_mes)
+        # print(current_mes)
+        last_mes = current_mes
+
         if date == next_rebalancing_date and rebalancing:
-            rebalance_portfolio_weights(data, date)
+            rebalancer.rebalance_portfolio_weights(data, date)
             next_rebalancing_date = date + rebalancing_cadence
 
         # Equity curve calculation
@@ -125,7 +145,6 @@ def backtest(data: pd.DataFrame(),
     #plt.show(block=True)
 
 
-
 def calculate_sharpe(candle_date_dfr: pd.DataFrame()):
     candle_date_dfr['pct_change'] = candle_date_dfr[
         'total_value'].pct_change().fillna(0)
@@ -140,89 +159,6 @@ def calculate_sharpe(candle_date_dfr: pd.DataFrame()):
     plt.show(block=True)
 
 
-def rebalance_portfolio_weights(data: pd.DataFrame(), date: str):
-
-    log.debug("Rebalancing portfolio at {}".format(date))
-
-    # get portfolio value
-    final_total_value, portfolio_values = broker.get_value_at(data, date)
-    log.debug("Portfolio values at {}: \n {}".format(date, portfolio_values))
-    log.debug("Total portfolio value: {}".format(round(final_total_value, 2)))
-
-    # get target USD distribution
-    even_usd_value_distribution = final_total_value / len(broker.POSITIONS)
-    even_perc_value_distribution = 1 / len(broker.POSITIONS)
-
-    # extend portfolio data frame with distribution values
-    portfolio_values[
-        'distribution_change_USDT'] = even_usd_value_distribution - portfolio_values['USDT_amount']
-    portfolio_values['distribution_perc'] = portfolio_values[
-        'USDT_amount'] / final_total_value
-
-    # split portfolio data frame in buy and sell parts
-    symbols_to_decrease = portfolio_values.loc[
-        portfolio_values['distribution_change_USDT'] < 0]
-
-    symbols_to_increase = portfolio_values.loc[
-        portfolio_values['distribution_change_USDT'] > 0]
-
-    log.debug("even distribution usd: {}".format(even_usd_value_distribution))
-    log.debug(
-        "even distribution perc: {}".format(even_perc_value_distribution))
-    log.debug("portfolio_values: \n {}".format(portfolio_values))
-    log.debug("symbols_to_decrease: \n {}".format(symbols_to_decrease))
-    #log.debug("symbols_to_increase: \n {}".format(symbols_to_increase))
-
-    for base, row in symbols_to_decrease.iterrows():
-        # Find out how much base to sell
-        price = row['BASE/USDT']
-        sell_amount_base = abs(row['distribution_change_USDT']) / price
-        #print(base, row['distribution_change_USDT'], price, sell_amount_base)
-        # Sell
-        broker.sell(
-            data=data,
-            date=date,
-            base=base,
-            base_sell_amount=sell_amount_base)
-
-    # Turn off chained assignment warning for pandas
-    # https://stackoverflow.com/questions/20625582/how-to-deal-with-settingwithcopywarning-in-pandas
-    pd.options.mode.chained_assignment = None
-
-    # how much should be redistributed
-    total_amount_to_distribute = broker.QUOTE_AMOUNT
-    log.debug("QUOTE_AMOUNT after selling: {}".format(broker.QUOTE_AMOUNT))
-
-    # extend symbols to increase with increase percentage distribution
-    total_increase_value = symbols_to_increase[
-        'distribution_change_USDT'].sum()
-
-    symbols_to_increase['increase_distr_perc'] = symbols_to_increase[
-        'distribution_change_USDT'] / total_increase_value
-
-    symbols_to_increase['buy_amount'] = symbols_to_increase[
-        'increase_distr_perc'] * total_amount_to_distribute
-
-    log.debug("symbols_to_increase: \n {}".format(symbols_to_increase))
-
-    for base, row in symbols_to_increase.iterrows():
-        # Buy
-        broker.buy(
-            data=data,
-            date=date,
-            base=base,
-            quote_buy_amount=row['buy_amount'])
-
-    # get portfolio value
-    final_total_value, portfolio_values = broker.get_value_at(data, date)
-    portfolio_values[
-        'distribution_change_USDT'] = even_usd_value_distribution - portfolio_values['USDT_amount']
-    portfolio_values['distribution_perc'] = portfolio_values[
-        'USDT_amount'] / final_total_value
-    log.debug("Portfolio values at {}: \n {}".format(date, portfolio_values))
-    log.debug("Total portfolio value: {}".format(round(final_total_value, 2)))
-
-
 if __name__ == '__main__':
 
     log.info("Backtest starting...")
@@ -235,4 +171,14 @@ if __name__ == '__main__':
 
     log.info("Testing...")
     backtest(
-        data=data, startdate='2017-01-01', enddate='2017-12-01', rebalancing=True)
+        data=data,
+        startdate='2017-01-01',
+        enddate='2017-12-01',
+        rebalancing=False)
+
+    portfolio_composition = get_portfolio_composition_01(
+        data=data, date='2017-12-01', portfolio_size=10)
+
+    #pprint(portfolio_composition)
+
+    rebalancer.rebalance_positions(data, '2017-12-01', portfolio_composition)

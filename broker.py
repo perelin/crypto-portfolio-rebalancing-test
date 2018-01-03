@@ -123,14 +123,15 @@ def positions_base_amount_to_df():
 
 
 def get_value_at(data: pd.DataFrame(), date: str):
-    '''
-        2do: extend with BASE/BTC price and BTC_amount columns
-    '''
 
     #log.debug("looking up portfolio value at %s" % date)
 
     # prepare position data
     positions_base_amount_dfr = positions_base_amount_to_df()
+    if positions_base_amount_dfr.empty:
+        return 0.0, pd.DataFrame(
+            pd.np.empty((0, 3)),
+            columns=['base_amount', 'BASE/USDT', 'USDT_amount'])
     positions_base_amount_dfr_tp = positions_base_amount_dfr.transpose()
     positions_base_amount_dfr_tp.columns = ['base_amount']
 
