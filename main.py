@@ -75,18 +75,6 @@ def backtest(data: pd.DataFrame(),
     portfolio_symbols = prices.get_most_expensive_symbols(
         data, startdate)[0:portfolio_size]
 
-    # # Setup initial $$$
-    # initial_quote_amount = broker.QUOTE_AMOUNT
-    # initial_invest_per_symbol = broker.QUOTE_AMOUNT / len(portfolio_symbols)
-
-    # # Buy initial portfolio
-    # for symbol in portfolio_symbols:
-    #     broker.buy(
-    #         data=data,
-    #         date=startdate,
-    #         base=symbol,
-    #         quote_buy_amount=initial_invest_per_symbol)
-
     initial_portfolio_composition = get_portfolio_composition_01(
         data=data, date=startdate, portfolio_size=portfolio_size)
     rebalancer.rebalance_positions(
@@ -97,29 +85,18 @@ def backtest(data: pd.DataFrame(),
     next_rebalancing_date = candle_date[0] + rebalancing_cadence
     date_totals = {}
     last_mes = portfolio_symbols
+    portfolio_composition = initial_portfolio_composition
 
     for date in candle_date:
 
         # Portfolio Logic
 
-        current_mes = prices.get_most_expensive_symbols(data,
-                                                        date)[0:portfolio_size]
-        if set(last_mes) != set(current_mes):
-            # print("Set Order changed! {}".format(date))
-            # print(last_mes)
-            # print(current_mes)
-            pass
-
-        # if pd.np.array_equal(last_mes, current_mes) != True:
-        #     print("NP Order changed! {}".format(date))
-
-        # print(date)
-        # print(last_mes)
-        # print(current_mes)
-        last_mes = current_mes
-
         if date == next_rebalancing_date and rebalancing:
-            rebalancer.rebalance_portfolio_weights(data, date)
+            rebalancer.rebalance_positions(
+                data=data,
+                date=date,
+                composition=portfolio_composition)
+
             next_rebalancing_date = date + rebalancing_cadence
 
         # Equity curve calculation
@@ -174,11 +151,11 @@ if __name__ == '__main__':
         data=data,
         startdate='2017-01-01',
         enddate='2017-12-01',
-        rebalancing=False)
+        rebalancing=True)
 
-    portfolio_composition = get_portfolio_composition_01(
-        data=data, date='2017-12-01', portfolio_size=10)
+    #portfolio_composition = get_portfolio_composition_01(
+    #    data=data, date='2017-12-01', portfolio_size=10)
 
     #pprint(portfolio_composition)
 
-    rebalancer.rebalance_positions(data, '2017-12-01', portfolio_composition)
+    #rebalancer.rebalance_positions(data, '2017-12-01', portfolio_composition)
