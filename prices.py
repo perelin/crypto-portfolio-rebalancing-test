@@ -4,9 +4,6 @@ import pandas as pd
 
 db = pw.SqliteDatabase('ohlcv_data_1d.db')
 
-#db = pw.SqliteDatabase('../util_get_data/ohlcv_data_1d.db')
-
-
 class OHLCVData(pw.Model):
     ''' ORM object '''
     exchange = pw.CharField()

@@ -124,8 +124,6 @@ def positions_base_amount_to_df():
 
 def get_value_at(data: pd.DataFrame(), date: str):
 
-    #log.debug("looking up portfolio value at %s" % date)
-
     # prepare position data
     positions_base_amount_dfr = positions_base_amount_to_df()
     if positions_base_amount_dfr.empty:
@@ -151,6 +149,6 @@ def get_value_at(data: pd.DataFrame(), date: str):
 
     # return
     total_portfolio_value = positions_base_amount_dfr_tp['USDT_amount'].sum()
-    #log.debug("result: \n {}".format(positions_base_amount_dfr_tp))
-    #log.debug("total: {}".format(round(total_portfolio_value,2)))
+    log.debug("result: \n {}".format(positions_base_amount_dfr_tp))
+    log.debug("total: {}".format(round(total_portfolio_value,2)))
     return total_portfolio_value, positions_base_amount_dfr_tp
